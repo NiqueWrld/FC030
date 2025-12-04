@@ -1,0 +1,13 @@
+main.c:165:5:main	8	static
+main.c:239:6:SystemClock_Config	112	static
+main.c:293:13:MX_I2C1_Init	8	static
+main.c:339:13:MX_TIM3_Init	64	static
+main.c:410:13:MX_USART1_UART_Init	8	static
+main.c:458:13:MX_GPIO_Init	48	static
+main.c:480:6:MEMS_MPU6050_Init	32	static
+main.c:509:6:MEMS_MPU6050_Read_Accel	40	static
+main.c:544:6:ClearUARTFlags	8	static
+main.c:552:6:calculate_IMU_error	48	static
+main.c:604:6:MEMS_MPU6050_Read_Gyro	40	static
+main.c:640:6:HAL_UART_RxCpltCallback	16	static
+main.c:722:6:Error_Handler	8	static
