@@ -228,103 +228,45 @@ int main(void)
 	  MEMS_MPU6050_Read_Gyro();
 	  HAL_Delay(5);
 
-	  if (DRONE_HOVER)
-	  {
-		  DRONE_HOVER = FALSE;
-	  }
 
-
-	  if (DRONE_IDLE)
-	  {
-		  duty_cyle1 = 10;
-		  duty_cyle2 = 10;
-		  duty_cyle3 = 10;
-		  duty_cyle4 = 10;
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
-		  DRONE_IDLE = FALSE;
-	  }
-	  if (INC_MOTOR1)
-	  {
-/*		  duty_cyle1 += 20;
-		  if (duty_cyle1 > Full_Speed)
-			  duty_cyle1 = Full_Speed; // full speed
-		  INC_MOTOR1 = FALSE;
-		  htim3.Instance->CCR1 = duty_cyle1;
-	***/
-		  htim3.Instance->CCR1 = Half_Speed;
-		  htim3.Instance->CCR2 = Half_Speed;
-		  HAL_Delay(2000);
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  INC_MOTOR1 = FALSE;
-
-	  }
-	  if (INC_MOTOR2)
-	  {
-/**		  duty_cyle2 += 20;
-		  if (duty_cyle2 > Full_Speed)
-			  duty_cyle2 = Full_Speed; // full speed
-		  INC_MOTOR2 = FALSE;
-		  htim3.Instance->CCR2 = duty_cyle2;**/
-		  htim3.Instance->CCR3 = Half_Speed;
-		  htim3.Instance->CCR4 = Half_Speed;
-		  HAL_Delay(2000);
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
-		  INC_MOTOR2 = FALSE;
-
-	  }
-	  if (INC_MOTOR3)
-	  {
-		  duty_cyle3 += 20;
-		  if (duty_cyle3 > Full_Speed)
-			  duty_cyle3 = Full_Speed; // full speed
-		  INC_MOTOR3 = FALSE;
-		  htim3.Instance->CCR3 = duty_cyle3;
-	  }
-	  if (INC_MOTOR4)
-	  {
-		  duty_cyle4 += 20;
-		  if (duty_cyle4 > Full_Speed)
-			  duty_cyle4 = Full_Speed; // full speed
-		  INC_MOTOR4 = FALSE;
-		  htim3.Instance->CCR4 = duty_cyle4;
-	  }
-	  if (DRONE_UP)
-	  {
-		  duty_cyle1 += 20;
-		  duty_cyle2 += 20;
-		  duty_cyle3 += 20;
-		  duty_cyle4 += 20;
-		  if ((duty_cyle1 > Full_Speed) || (duty_cyle2 > Full_Speed) || (duty_cyle3 > Full_Speed) || (duty_cyle4 > Full_Speed))
-		  {
-			  duty_cyle1 -= 20;
-			  duty_cyle2 -= 20;
-			  duty_cyle3 -= 20;
-			  duty_cyle4 -= 20;
-			  Stablize = TRUE;
-		  }
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
-		  DRONE_UP = FALSE;
-	  }
-	  if (DRONE_STOP)
+	  htim3.Instance->CCR1 = duty_cyle1;
+	  duty_cyle1+=50;
+	  if (duty_cyle1>500)
 	  {
 		  duty_cyle1 = 0;
-		  duty_cyle2 = 0;
-		  duty_cyle3 = 0;
-		  duty_cyle4 = 0;
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
-		  DRONE_STOP = FALSE;
 	  }
+
+	  HAL_Delay(20);
+
+
+	  htim3.Instance->CCR2 = duty_cyle2;
+	 	  duty_cyle2+=50;
+	 	  if (duty_cyle2>500)
+	 	  {
+	 		  duty_cyle2 = 0;
+	 	  }
+
+	 	  HAL_Delay(20);
+
+
+	 	 htim3.Instance->CCR3 = duty_cyle3;
+	 		  duty_cyle3+=50;
+	 		  if (duty_cyle3>500)
+	 		  {
+	 			  duty_cyle3 = 0;
+	 		  }
+
+	 		  HAL_Delay(20);
+
+
+	 		 htim3.Instance->CCR4 = duty_cyle4;
+	 			  duty_cyle4+=30;
+	 			  if (duty_cyle4>500)
+	 			  {
+	 				  duty_cyle4 = 0;
+	 			  }
+
+	 			  HAL_Delay(20);
   }
   /* USER CODE END 3 */
 }
