@@ -96,7 +96,7 @@ static void MX_USART1_UART_Init(void);
 
 
 #define Stable_Speed   300
-#define Full_Speed   700
+#define Full_Speed   800
 #define Half_Speed   350
 #define Test_Speed   600
 
@@ -143,6 +143,11 @@ char INC_MOTOR3 = FALSE;
 char INC_MOTOR4 = FALSE;
 char DRONE_STOP = FALSE;
 char DRONE_UP   = FALSE;
+char DRONE_DOWN = FALSE;
+char DRONE_LEFT = FALSE;
+char DRONE_RIGHT = FALSE;
+char DRONE_ROTATE_LEFT = FALSE;
+char DRONE_ROTATE_RIGHT = FALSE;
 char DRONE_IDLE = FALSE;
 char DRONE_HOVER = FALSE;
 char Hover_Active = FALSE;
@@ -150,6 +155,10 @@ int hover_duty1 = 0;
 int hover_duty2 = 0;
 int hover_duty3 = 0;
 int hover_duty4 = 0;
+int rotation_timeout_left = 0;
+int rotation_timeout_right = 0;
+int max_rotation_duration = 10; // Max rotation duration in loop cycles
+
 char Stablize = FALSE;
 char STAB1 = FALSE;
 char STAB2 = FALSE;
@@ -214,30 +223,17 @@ int main(void)
   HAL_GPIO_WritePin(GPIOC, LED1_Pin, GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOC, LED2_Pin, GPIO_PIN_RESET);
   
-  // Send ready message via UART
-  unsigned char ready_msg[] = "READY\r\n";
-  HAL_UART_Transmit(&huart1, ready_msg, 7, 100);
-
-  // Startup sequence: Run all motors at 10% speed for 10 seconds
-  unsigned char startup_msg[] = "STARTUP: 10% MOTORS FOR 10 SEC\r\n";
-  HAL_UART_Transmit(&huart1, startup_msg, 32, 100);
-  
-  int startup_speed = 70; // 10% of Full_Speed (700)
+  // Brief startup sequence
+  int startup_speed = 70;
   htim3.Instance->CCR1 = startup_speed;
   htim3.Instance->CCR2 = startup_speed;
   htim3.Instance->CCR3 = startup_speed;
   htim3.Instance->CCR4 = startup_speed;
-  
-  HAL_Delay(10000); // 10 seconds
-  
-  // Stop motors after startup sequence
+  HAL_Delay(2000);
   htim3.Instance->CCR1 = 0;
   htim3.Instance->CCR2 = 0;
   htim3.Instance->CCR3 = 0;
   htim3.Instance->CCR4 = 0;
-  
-  unsigned char startup_done_msg[] = "STARTUP COMPLETE\r\n";
-  HAL_UART_Transmit(&huart1, startup_done_msg, 18, 100);
 
   /* USER CODE END 2 */
 
@@ -259,18 +255,18 @@ int main(void)
 
 	  if (DRONE_HOVER)
 	  {
-		  // Store current motor speeds for hovering
-		  hover_duty1 = duty_cyle1;
-		  hover_duty2 = duty_cyle2;
-		  hover_duty3 = duty_cyle3;
-		  hover_duty4 = duty_cyle4;
+		  // Set hover to full power for all motors and update duty cycle variables
+		  duty_cyle1 = Full_Speed;
+		  duty_cyle2 = Full_Speed;
+		  duty_cyle3 = Full_Speed;
+		  duty_cyle4 = Full_Speed;
 		  Hover_Active = TRUE;
 		  
-		  // Set motors to hover speeds (maintain current levels)
-		  htim3.Instance->CCR1 = hover_duty1;
-		  htim3.Instance->CCR2 = hover_duty2;
-		  htim3.Instance->CCR3 = hover_duty3;
-		  htim3.Instance->CCR4 = hover_duty4;
+		  // Set motors to hover speeds
+		  htim3.Instance->CCR1 = duty_cyle1;
+		  htim3.Instance->CCR2 = duty_cyle2;
+		  htim3.Instance->CCR3 = duty_cyle3;
+		  htim3.Instance->CCR4 = duty_cyle4;
 		  
 		  DRONE_HOVER = FALSE;
 	  }
@@ -291,46 +287,17 @@ int main(void)
 
 	  if (INC_MOTOR1)
 	  {
+		  // Test front motors at half speed
 		  htim3.Instance->CCR1 = Half_Speed;
 		  htim3.Instance->CCR2 = Half_Speed;
-		  HAL_Delay(2000);
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  
-		  // Send M1 duty cycle value as text
-		  unsigned char m1_msg[20];
-		  int len = 0;
-		  int value = duty_cyle1;
-		  
-		  // Simple integer to string conversion
-		  if (value == 0) {
-			  m1_msg[len++] = '0';
-		  } else {
-			  unsigned char temp[10];
-			  int temp_len = 0;
-			  while (value > 0) {
-				  temp[temp_len++] = '0' + (value % 10);
-				  value /= 10;
-			  }
-			  // Reverse the digits
-			  for (int i = temp_len - 1; i >= 0; i--) {
-				  m1_msg[len++] = temp[i];
-			  }
-		  }
-		  m1_msg[len++] = '\r';
-		  m1_msg[len++] = '\n';
-		  
-		  HAL_UART_Transmit(&huart1, m1_msg, len, 100);
 		  INC_MOTOR1 = FALSE;
 	  }
 
 	  if (INC_MOTOR2)
 	  {
+		  // Test rear motors at half speed
 		  htim3.Instance->CCR3 = Half_Speed;
 		  htim3.Instance->CCR4 = Half_Speed;
-		  HAL_Delay(2000);
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
 		  INC_MOTOR2 = FALSE;
 	  }
 
@@ -354,53 +321,209 @@ int main(void)
 
 	  if (DRONE_UP)
 	  {
-		  duty_cyle1 += 20;
-		  duty_cyle2 += 20;
-		  duty_cyle3 += 20;
-		  duty_cyle4 += 20;
-		  if ((duty_cyle1 > Full_Speed) || (duty_cyle2 > Full_Speed) || (duty_cyle3 > Full_Speed) || (duty_cyle4 > Full_Speed))
+		  // Safety check: Only allow movement if not at maximum speed
+		  if ((duty_cyle1 < Full_Speed) || (duty_cyle2 < Full_Speed) || 
+			  (duty_cyle3 < Full_Speed) || (duty_cyle4 < Full_Speed))
+		  {
+			  duty_cyle1 += 20;
+			  duty_cyle2 += 20;
+			  duty_cyle3 += 20;
+			  duty_cyle4 += 20;
+			  
+			  // Bounds checking
+			  if (duty_cyle1 > Full_Speed) duty_cyle1 = Full_Speed;
+			  if (duty_cyle2 > Full_Speed) duty_cyle2 = Full_Speed;
+			  if (duty_cyle3 > Full_Speed) duty_cyle3 = Full_Speed;
+			  if (duty_cyle4 > Full_Speed) duty_cyle4 = Full_Speed;
+			  
+			  htim3.Instance->CCR1 = duty_cyle1;
+			  htim3.Instance->CCR2 = duty_cyle2;
+			  htim3.Instance->CCR3 = duty_cyle3;
+			  htim3.Instance->CCR4 = duty_cyle4;
+		  }
+		  
+		  DRONE_UP = FALSE;
+	  }
+
+	  if (DRONE_DOWN)
+	  {
+		  // Safety check: Only allow movement if motors are running
+		  if ((duty_cyle1 > 0) || (duty_cyle2 > 0) || (duty_cyle3 > 0) || (duty_cyle4 > 0))
 		  {
 			  duty_cyle1 -= 20;
 			  duty_cyle2 -= 20;
 			  duty_cyle3 -= 20;
 			  duty_cyle4 -= 20;
-			  Stablize = TRUE;
+			  
+			  // Bounds checking
+			  if (duty_cyle1 < 0) duty_cyle1 = 0;
+			  if (duty_cyle2 < 0) duty_cyle2 = 0;
+			  if (duty_cyle3 < 0) duty_cyle3 = 0;
+			  if (duty_cyle4 < 0) duty_cyle4 = 0;
+			  
+			  htim3.Instance->CCR1 = duty_cyle1;
+			  htim3.Instance->CCR2 = duty_cyle2;
+			  htim3.Instance->CCR3 = duty_cyle3;
+			  htim3.Instance->CCR4 = duty_cyle4;
 		  }
 		  
-		  // Send current motor values
-		  unsigned char values_msg[30];
-		  int len = 0;
+		  DRONE_DOWN = FALSE;
+	  }
+
+	  if (DRONE_LEFT)
+	  {
+		  // Safety check: Only allow movement if motors are running at minimum speed
+		  int min_speed = 100;
+		  if ((duty_cyle1 >= min_speed) || (duty_cyle2 >= min_speed) || 
+			  (duty_cyle3 >= min_speed) || (duty_cyle4 >= min_speed))
+		  {
+			  // Increase right motors, decrease left motors for left movement
+			  duty_cyle2 += 20; // Right front
+			  duty_cyle4 += 20; // Right rear
+			  duty_cyle1 -= 10; // Left front
+			  duty_cyle3 -= 10; // Left rear
+			  
+			  // Bounds checking
+			  if (duty_cyle2 > Full_Speed) duty_cyle2 = Full_Speed;
+			  if (duty_cyle4 > Full_Speed) duty_cyle4 = Full_Speed;
+			  if (duty_cyle1 < 0) duty_cyle1 = 0;
+			  if (duty_cyle3 < 0) duty_cyle3 = 0;
+			  
+			  htim3.Instance->CCR1 = duty_cyle1;
+			  htim3.Instance->CCR2 = duty_cyle2;
+			  htim3.Instance->CCR3 = duty_cyle3;
+			  htim3.Instance->CCR4 = duty_cyle4;
+		  }
 		  
-		  // Convert duty_cyle1 to string
-		  int val = duty_cyle1;
-		  if (val == 0) {
-			  values_msg[len++] = '0';
-		  } else {
-			  unsigned char temp[10];
-			  int temp_len = 0;
-			  while (val > 0) {
-				  temp[temp_len++] = '0' + (val % 10);
-				  val /= 10;
-			  }
-			  for (int i = temp_len - 1; i >= 0; i--) {
-				  values_msg[len++] = temp[i];
+		  DRONE_LEFT = FALSE;
+	  }
+
+	  if (DRONE_RIGHT)
+	  {
+		  // Safety check: Only allow movement if motors are running at minimum speed
+		  int min_speed = 100;
+		  if ((duty_cyle1 >= min_speed) || (duty_cyle2 >= min_speed) || 
+			  (duty_cyle3 >= min_speed) || (duty_cyle4 >= min_speed))
+		  {
+			  // Increase left motors, decrease right motors for right movement
+			  duty_cyle1 += 20; // Left front
+			  duty_cyle3 += 20; // Left rear
+			  duty_cyle2 -= 10; // Right front
+			  duty_cyle4 -= 10; // Right rear
+			  
+			  // Bounds checking
+			  if (duty_cyle1 > Full_Speed) duty_cyle1 = Full_Speed;
+			  if (duty_cyle3 > Full_Speed) duty_cyle3 = Full_Speed;
+			  if (duty_cyle2 < 0) duty_cyle2 = 0;
+			  if (duty_cyle4 < 0) duty_cyle4 = 0;
+			  
+			  htim3.Instance->CCR1 = duty_cyle1;
+			  htim3.Instance->CCR2 = duty_cyle2;
+			  htim3.Instance->CCR3 = duty_cyle3;
+			  htim3.Instance->CCR4 = duty_cyle4;
+		  }
+		  
+		  DRONE_RIGHT = FALSE;
+	  }
+
+	  if (DRONE_ROTATE_LEFT)
+	  {
+		  // Safety check: Only allow rotation if motors are running at minimum speed
+		  int min_speed = 100; // Minimum speed threshold for rotation
+		  if ((duty_cyle1 >= min_speed) || (duty_cyle2 >= min_speed) || 
+			  (duty_cyle3 >= min_speed) || (duty_cyle4 >= min_speed))
+		  {
+			  // Start rotation timeout counter
+			  if (rotation_timeout_left == 0)
+				  rotation_timeout_left = max_rotation_duration;
+			  
+			  if (rotation_timeout_left > 0)
+			  {
+				  // Rotate left: Increase front-left & rear-right, decrease front-right & rear-left
+				  duty_cyle1 += 15; // Front left +
+				  duty_cyle4 += 15; // Rear right +
+				  duty_cyle2 -= 15; // Front right -
+				  duty_cyle3 -= 15; // Rear left -
+				  
+				  // Bounds checking
+				  if (duty_cyle1 > Full_Speed) duty_cyle1 = Full_Speed;
+				  if (duty_cyle4 > Full_Speed) duty_cyle4 = Full_Speed;
+				  if (duty_cyle2 < 0) duty_cyle2 = 0;
+				  if (duty_cyle3 < 0) duty_cyle3 = 0;
+				  
+				  htim3.Instance->CCR1 = duty_cyle1;
+				  htim3.Instance->CCR2 = duty_cyle2;
+				  htim3.Instance->CCR3 = duty_cyle3;
+				  htim3.Instance->CCR4 = duty_cyle4;
+				  
+				  rotation_timeout_left--;
 			  }
 		  }
-		  values_msg[len++] = '\r';
-		  values_msg[len++] = '\n';
 		  
-		  HAL_UART_Transmit(&huart1, values_msg, len, 100);
+		  // Reset rotation flag when timeout expires or safety check fails
+		  if (rotation_timeout_left <= 0)
+		  {
+			  DRONE_ROTATE_LEFT = FALSE;
+			  rotation_timeout_left = 0;
+		  }
+	  }
+	  else
+	  {
+		  // Reset timeout when command is not active
+		  rotation_timeout_left = 0;
+	  }
+
+	  if (DRONE_ROTATE_RIGHT)
+	  {
+		  // Safety check: Only allow rotation if motors are running at minimum speed
+		  int min_speed = 100; // Minimum speed threshold for rotation
+		  if ((duty_cyle1 >= min_speed) || (duty_cyle2 >= min_speed) || 
+			  (duty_cyle3 >= min_speed) || (duty_cyle4 >= min_speed))
+		  {
+			  // Start rotation timeout counter
+			  if (rotation_timeout_right == 0)
+				  rotation_timeout_right = max_rotation_duration;
+			  
+			  if (rotation_timeout_right > 0)
+			  {
+				  // Rotate right: Increase front-right & rear-left, decrease front-left & rear-right
+				  duty_cyle2 += 15; // Front right +
+				  duty_cyle3 += 15; // Rear left +
+				  duty_cyle1 -= 15; // Front left -
+				  duty_cyle4 -= 15; // Rear right -
+				  
+				  // Bounds checking
+				  if (duty_cyle2 > Full_Speed) duty_cyle2 = Full_Speed;
+				  if (duty_cyle3 > Full_Speed) duty_cyle3 = Full_Speed;
+				  if (duty_cyle1 < 0) duty_cyle1 = 0;
+				  if (duty_cyle4 < 0) duty_cyle4 = 0;
+				  
+				  htim3.Instance->CCR1 = duty_cyle1;
+				  htim3.Instance->CCR2 = duty_cyle2;
+				  htim3.Instance->CCR3 = duty_cyle3;
+				  htim3.Instance->CCR4 = duty_cyle4;
+				  
+				  rotation_timeout_right--;
+			  }
+		  }
 		  
-		  htim3.Instance->CCR1 = duty_cyle1;
-		  htim3.Instance->CCR2 = duty_cyle2;
-		  htim3.Instance->CCR3 = duty_cyle3;
-		  htim3.Instance->CCR4 = duty_cyle4;
-		  DRONE_UP = FALSE;
+		  // Reset rotation flag when timeout expires or safety check fails
+		  if (rotation_timeout_right <= 0)
+		  {
+			  DRONE_ROTATE_RIGHT = FALSE;
+			  rotation_timeout_right = 0;
+		  }
+	  }
+	  else
+	  {
+		  // Reset timeout when command is not active
+		  rotation_timeout_right = 0;
 	  }
 
 	  if (DRONE_STOP)
 	  {
 		  Hover_Active = FALSE; // Disable hover when stopping
+		  
 		  // Smoothly decrement each motor down to 0 instead of instant stop
 		  int step = 20; // decrement step per iteration
 		  while ((duty_cyle1 > 0) || (duty_cyle2 > 0) || (duty_cyle3 > 0) || (duty_cyle4 > 0))
@@ -435,15 +558,11 @@ int main(void)
 		  DRONE_STOP = FALSE;
 	  }
 
-	  // Only update PWM when commands are received (removed automatic updates)
-	  // Maintain hover if active
-	  if (Hover_Active)
-	  {
-		  htim3.Instance->CCR1 = hover_duty1;
-		  htim3.Instance->CCR2 = hover_duty2;
-		  htim3.Instance->CCR3 = hover_duty3;
-		  htim3.Instance->CCR4 = hover_duty4;
-	  }
+	  // Update PWM outputs to match duty cycle variables
+	  htim3.Instance->CCR1 = duty_cyle1;
+	  htim3.Instance->CCR2 = duty_cyle2;
+	  htim3.Instance->CCR3 = duty_cyle3;
+	  htim3.Instance->CCR4 = duty_cyle4;
 	  
 	  HAL_Delay(20);
   }
@@ -860,57 +979,8 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
 	if (huart == &huart1)
 	{
-		// Echo received character for debugging
-		HAL_UART_Transmit(&huart1, Rx_data, 1, 100);
-		
-		// Check for text commands (DRONE_UP, DRONE_STOP, etc.)
-		if (Rx_data[0] == 'D' && BLE_pnt == 0)
-		{
-			rec_buffer[BLE_pnt] = Rx_data[0];
-			BLE_pnt++;
-		}
-		else if (BLE_pnt > 0 && BLE_pnt < 9)
-		{
-			rec_buffer[BLE_pnt] = Rx_data[0];
-			BLE_pnt++;
-			
-			// Check for complete DRONE_UP command
-			if (BLE_pnt == 8 && 
-				rec_buffer[0] == 'D' && rec_buffer[1] == 'R' && rec_buffer[2] == 'O' &&
-				rec_buffer[3] == 'N' && rec_buffer[4] == 'E' && rec_buffer[5] == '_' &&
-				rec_buffer[6] == 'U' && rec_buffer[7] == 'P')
-			{
-				DRONE_UP = TRUE;
-				unsigned char msg[] = "UP COMMAND\r\n";
-				HAL_UART_Transmit(&huart1, msg, 12, 100);
-				BLE_pnt = 0;
-				return;
-			}
-			// Check for DRONE_STOP
-			else if (BLE_pnt == 10 &&
-				rec_buffer[0] == 'D' && rec_buffer[1] == 'R' && rec_buffer[2] == 'O' &&
-				rec_buffer[3] == 'N' && rec_buffer[4] == 'E' && rec_buffer[5] == '_' &&
-				rec_buffer[6] == 'S' && rec_buffer[7] == 'T' && rec_buffer[8] == 'O' && rec_buffer[9] == 'P')
-			{
-				DRONE_STOP = TRUE;
-				unsigned char msg[] = "STOP COMMAND\r\n";
-				HAL_UART_Transmit(&huart1, msg, 14, 100);
-				BLE_pnt = 0;
-				return;
-			}
-		}
-		else
-		{
-			BLE_pnt = 0; // Reset if not matching text command
-		}
-		
-		// Print BLE connected message on first valid command
-		if (!BLE_connected && (Rx_data[0] == 'M' || Rx_data[0] == 'D'))
-		{
-			unsigned char ble_msg[] = "BLE OK\r\n";
-			HAL_UART_Transmit(&huart1, ble_msg, 8, 100);
-			BLE_connected = TRUE;
-		}
+		// Simple command processing
+		BLE_connected = TRUE;
 		
 		if ((Rx_data[0] == 'M') ||
 				(Rx_data[0] == '0') ||
@@ -919,6 +989,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 				(Rx_data[0] == '3') ||
 				(Rx_data[0] == 'X') ||
 				(Rx_data[0] == 'U') ||
+				(Rx_data[0] == 'D') ||
+				(Rx_data[0] == 'L') ||
+				(Rx_data[0] == 'R') ||
+				(Rx_data[0] == 'Q') ||
+				(Rx_data[0] == 'E') ||
 				(Rx_data[0] == 'H') ||
 				(Rx_data[0] == 'S'))
 		{
@@ -926,59 +1001,83 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 			BLE_pnt++;
 			if (BLE_pnt >= 2)
 			{
-				// Echo complete command
-				unsigned char cmd_echo[5] = {"Cmd:"};
-				HAL_UART_Transmit(&huart1, cmd_echo, 4, 100);
-				HAL_UART_Transmit(&huart1, rec_buffer, 2, 100);
-				unsigned char newline[2] = {"\r\n"};
-				HAL_UART_Transmit(&huart1, newline, 2, 100);
 				if ((rec_buffer[0] == 'M') && (rec_buffer[1] == 'H'))
 				{
 					DRONE_HOVER = TRUE;
-					unsigned char msg[] = "HOVER ON\r\n";
-					HAL_UART_Transmit(&huart1, msg, 10, 100);
+					unsigned char msg[] = "H\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				} else
 				if ((rec_buffer[0] == 'M') && (rec_buffer[1] == 'S'))
 				{
 					DRONE_IDLE = TRUE;
-					unsigned char msg[] = "IDLE MODE\r\n";
-					HAL_UART_Transmit(&huart1, msg, 11, 100);
+					unsigned char msg[] = "S\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				} else
 				if ((rec_buffer[0] == 'M') && (rec_buffer[1] == '0'))
 				{
 					INC_MOTOR1 = TRUE;
-					unsigned char msg[] = "MOTOR1 TEST\r\n";
-					HAL_UART_Transmit(&huart1, msg, 13, 100);
+					unsigned char msg[] = "0\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else if ((rec_buffer[0] == 'M') && (rec_buffer[1] == '1'))
 				{
 					INC_MOTOR2 = TRUE;
-					unsigned char msg[] = "MOTOR2 TEST\r\n";
-					HAL_UART_Transmit(&huart1, msg, 13, 100);
+					unsigned char msg[] = "1\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else if ((rec_buffer[0] == 'M') && (rec_buffer[1] == '2'))
 				{
 					INC_MOTOR3 = TRUE;
-					unsigned char msg[] = "MOTOR3 INC\r\n";
-					HAL_UART_Transmit(&huart1, msg, 12, 100);
+					unsigned char msg[] = "2\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else if ((rec_buffer[0] == 'M') && (rec_buffer[1] == '3'))
 				{
 					INC_MOTOR4 = TRUE;
-					unsigned char msg[] = "MOTOR4 INC\r\n";
-					HAL_UART_Transmit(&huart1, msg, 12, 100);
+					unsigned char msg[] = "3\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'U'))
 				{
 					DRONE_UP = TRUE;
-					unsigned char msg[] = "THROTTLE UP\r\n";
-					HAL_UART_Transmit(&huart1, msg, 13, 100);
+					unsigned char msg[] = "U\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
+				}
+				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'D'))
+				{
+					DRONE_DOWN = TRUE;
+					unsigned char msg[] = "D\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
+				}
+				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'L'))
+				{
+					DRONE_LEFT = TRUE;
+					unsigned char msg[] = "L\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
+				}
+				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'R'))
+				{
+					DRONE_RIGHT = TRUE;
+					unsigned char msg[] = "R\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
+				}
+				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'Q'))
+				{
+					DRONE_ROTATE_LEFT = TRUE;
+					unsigned char msg[] = "Q\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
+				}
+				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'E'))
+				{
+					DRONE_ROTATE_RIGHT = TRUE;
+					unsigned char msg[] = "E\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else if((rec_buffer[0] == 'M') && (rec_buffer[1] == 'X'))
 				{
 					DRONE_STOP = TRUE;
-					unsigned char msg[] = "STOPPING...\r\n";
-					HAL_UART_Transmit(&huart1, msg, 13, 100);
+					unsigned char msg[] = "X\r\n";
+					HAL_UART_Transmit(&huart1, msg, 3, 100);
 				}
 				else
 				{
@@ -987,6 +1086,11 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 					INC_MOTOR3 = FALSE;
 					INC_MOTOR4 = FALSE;
 					DRONE_UP = FALSE;
+					DRONE_DOWN = FALSE;
+					DRONE_LEFT = FALSE;
+					DRONE_RIGHT = FALSE;
+					DRONE_ROTATE_LEFT = FALSE;
+					DRONE_ROTATE_RIGHT = FALSE;
 				}
 				BLE_pnt = 0;
 			}
